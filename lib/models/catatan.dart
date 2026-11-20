@@ -36,9 +36,11 @@ class Catatan {
 
   // Model -> baris tabel. SQLite tidak punya bool dan DateTime:
   // bool disimpan sebagai 1/0, waktu sebagai milidetik.
+  // Model -> baris tabel. SQLite tidak punya bool dan DateTime:
+  // bool disimpan sebagai 1/0, waktu sebagai milidetik.
   Map<String, Object?> keBaris() {
     return {
-      'id': ?id,
+      'id': id,
       'uid': uid,
       'judul': judul,
       'isi': isi,
@@ -47,26 +49,56 @@ class Catatan {
     };
   }
 
-  // Baris tabel = Model.
+  // Baris tabel -> Model (untuk SQLite)
   factory Catatan.dariBaris(Map<String, Object?> baris) {
     return switch (baris) {
       {
-      'id': final int id,
-      'uid': final String uid,
-      'judul': final String judul,
-      'isi': final String isi,
-      'diubah': final int diubah,
-      'disematkan': final int disematkan,
+        'id': final int id,
+        'uid': final String uid,
+        'judul': final String judul,
+        'isi': final String isi,
+        'diubah': final int diubah,
+        'disematkan': final int disematkan,
       } =>
-          Catatan(
-            id: id,
-            uid: uid,
-            judul: judul,
-            isi: isi,
-            diubah: DateTime.fromMillisecondsSinceEpoch(diubah),
-            disematkan: disematkan == 1,
-          ),
+        Catatan(
+          id: id,
+          uid: uid,
+          judul: judul,
+          isi: isi,
+          diubah: DateTime.fromMillisecondsSinceEpoch(diubah),
+          disematkan: disematkan == 1,
+        ),
       _ => throw FormatException('Baris catatan tidak sesuai: $baris'),
+    };
+  }
+
+  // JSON -> Model (Disesuaikan dengan DummyJSON /posts)
+  factory Catatan.fromJson(Map<String, dynamic> json) {
+    return switch (json) {
+      {
+        'id': final int id,
+        'title': final String judul,
+        'body': final String isi,
+        'userId': final int userId,
+      } =>
+        Catatan(
+          id: id,
+          uid: userId.toString(),
+          judul: judul,
+          isi: isi,
+          diubah: DateTime.now(), // DummyJSON tidak punya field tanggal
+          disematkan: false,
+        ),
+      _ => throw FormatException('Bentuk JSON tidak sesuai: $json'),
+    };
+  }
+
+  // Model -> JSON (Disesuaikan dengan DummyJSON /posts/add)
+  Map<String, dynamic> toJson() {
+    return {
+      'title': judul,
+      'body': isi,
+      'userId': int.tryParse(uid) ?? 1,
     };
   }
 }

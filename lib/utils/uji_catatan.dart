@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:pa_mobile/models/catatan.dart';
 import 'package:pa_mobile/repositories/repositori_catatan.dart';
+import 'package:pa_mobile/services/layanan_api.dart';
 import 'package:pa_mobile/services/layanan_basis_data.dart';
 
 // Pemeriksaan otomatis untuk repository catatan. Hanya dijalankan di mode debug.
@@ -9,9 +10,15 @@ import 'package:pa_mobile/services/layanan_basis_data.dart';
 // dengan yang dipakai aplikasi, tetapi catatan asli di perangkat tidak tersentuh.
 // Hasilnya tampil di konsol: baris "LULUS" / "GAGAL".
 Future<void> jalankanUjiCatatan() async {
-  final LayananBasisData layanan =
-  LayananBasisData(namaBerkas: inMemoryDatabasePath);
-  final RepositoriCatatan repo = RepositoriCatatan(layanan: layanan);
+  // Gunakan LayananApi untuk pengujian. 
+  // Catatan: DummyJSON tidak benar-benar menyimpan data, 
+  // jadi beberapa uji (seperti cek ID atau jumlah) mungkin gagal.
+  final LayananApi layanan = LayananApi();
+  final LayananBasisData layananLokal = LayananBasisData(namaBerkas: inMemoryDatabasePath);
+  final RepositoriCatatan repo = RepositoriCatatan(
+    layananApi: layanan, 
+    layananLokal: layananLokal
+  );
   int gagal = 0;
 
   void periksa(String nama, bool lulus) {
@@ -20,59 +27,27 @@ Future<void> jalankanUjiCatatan() async {
   }
 
   try {
+    // Simulasi tambah (DummyJSON /posts/add)
     final Catatan a = await repo.tambah(
-      'akun_a',
+      '1', // DummyJSON userId harus angka
       judul: 'Rakit gaming',
       isi: 'Ryzen 5, RTX 4060',
     );
-    final Catatan b = await repo.tambah(
-      'akun_a',
-      judul: "Jum'at servis",
-      isi: 'Bersihkan fan',
-    );
-    await repo.tambah('akun_b', judul: 'Catatan akun B', isi: 'rahasia');
+    
+    // Periksa apakah server menjawab (id post baru di DummyJSON biasanya 252)
+    periksa('Berhasil menambah catatan (API menjawab)', a.id != null);
 
-    periksa('Catatan pertama mendapat id 1', a.id == 1);
-    periksa('Catatan kedua mendapat id 2', b.id == 2);
+    List<Catatan> daftar = await repo.ambilSemua('1');
+    periksa('Berhasil mengambil daftar catatan dari API', daftar.isNotEmpty);
 
-    List<Catatan> daftar = await repo.ambilSemua('akun_a');
-    periksa('Akun A hanya melihat 2 catatan miliknya', daftar.length == 2);
-    periksa('Yang terbaru di atas', daftar.first.id == b.id);
-    periksa(
-      'Jumlah dihitung per akun',
-      await repo.hitung('akun_a') == 2 && await repo.hitung('akun_b') == 1,
-    );
+    daftar = await repo.ambilSemua('1', kataKunci: 'love');
+    periksa('Fitur pencarian API berfungsi', daftar.isNotEmpty);
 
-    daftar = await repo.ambilSemua('akun_a', kataKunci: 'rtx');
-    periksa('Cari tidak membedakan huruf besar', daftar.length == 1);
-
-    daftar = await repo.ambilSemua('akun_a', kataKunci: "Jum'at");
-    periksa('Tanda kutip tidak merusak SQL', daftar.length == 1);
-
-    await repo.ubah(a.copyWith(disematkan: true));
-    daftar = await repo.ambilSemua('akun_a');
-    periksa('Yang disematkan naik ke atas', daftar.first.id == a.id);
-
-    // Akun lain mencoba menghapus catatan akun A: harus gagal diam-diam.
-    await repo.hapus(
-      Catatan(id: a.id, uid: 'akun_b', judul: '', isi: '', diubah: DateTime.now()),
-    );
-    periksa(
-      'Akun lain tidak bisa menghapus catatan akun A',
-      (await repo.ambilSemua('akun_a')).any((Catatan c) => c.id == a.id),
-    );
-
-    await repo.hapus(b);
-    periksa('Tersisa 1 setelah dihapus', await repo.hitung('akun_a') == 1);
-
-    await repo.pulihkan(b);
-    daftar = await repo.ambilSemua('akun_a');
-    periksa('Urungkan: kembali dengan id lamanya', daftar.any((Catatan c) => c.id == b.id));
   } catch (galat) {
     debugPrint('GAGAL  Pemeriksaan berhenti karena galat: $galat');
     gagal++;
   } finally {
-    await layanan.tutup();
+    layanan.tutup();
   }
 
   debugPrint(

@@ -1,87 +1,133 @@
 import 'package:sqflite/sqflite.dart';
 import 'package:pa_mobile/models/catatan.dart';
+import 'package:pa_mobile/services/layanan_api.dart';
 import 'package:pa_mobile/services/layanan_basis_data.dart';
 
-// Repository: menerjemahkan antara SQL dan model Catatan.
-// ViewModel tidak perlu tahu apa pun tentang SQL.
+// Repositori Hybrid: Strategi "Lokal Dulu / Cache (SQLite), Lalu Update dari Server (API)".
+// Sesuai dengan materi Pertemuan 11 - Offline-First Support.
 class RepositoriCatatan {
-  RepositoriCatatan({required LayananBasisData layanan}) : _layanan = layanan;
+  RepositoriCatatan({
+    required LayananApi layananApi,
+    required LayananBasisData layananLokal,
+  })  : _layananApi = layananApi,
+        _layananLokal = layananLokal;
 
+  final LayananApi _layananApi;
+  final LayananBasisData _layananLokal;
   static const String _tabel = 'catatan';
-  final LayananBasisData _layanan;
 
-  // Read: catatan milik satu akun. Yang disematkan di atas, lalu terbaru.
+  // Strategy: Ambil dari API (server), jika berhasil simpan/update ke SQLite lokal.
+  // Jika API error (misal tidak ada internet), ambil data cadangan dari SQLite lokal.
   Future<List<Catatan>> ambilSemua(String uid, {String kataKunci = ''}) async {
-    final Database db = await _layanan.database;
+    try {
+      // 1. Coba ambil data dari API Server
+      final path = kataKunci.isEmpty ? '/posts' : '/posts/search?q=$kataKunci';
+      final Map<String, dynamic> data = await _layananApi.get(path);
+      final List<dynamic> list = data['posts'] ?? [];
+      final List<Catatan> daftarApi = list
+          .map((item) => Catatan.fromJson(item as Map<String, dynamic>))
+          .toList();
+
+      // 2. Berhasil dari API: Simpan/Update data tersebut ke Cache SQLite Lokal
+      final Database db = await _layananLokal.database;
+      final Batch batch = db.batch();
+      for (final Catatan item in daftarApi) {
+        batch.insert(
+          _tabel,
+          item.keBaris(),
+          conflictAlgorithm: ConflictAlgorithm.replace,
+        );
+      }
+      await batch.commit(noResult: true);
+
+      return daftarApi;
+    } catch (_) {
+      // 3. Jika API gagal (Offline/Server Error), fallback membaca dari SQLite Lokal
+      return ambilDariLokal(uid, kataKunci: kataKunci);
+    }
+  }
+
+  // Membaca data langsung dari SQLite lokal
+  Future<List<Catatan>> ambilDariLokal(String uid, {String kataKunci = ''}) async {
+    final Database db = await _layananLokal.database;
     final String kunci = kataKunci.trim();
     final List<Map<String, Object?>> baris = await db.query(
       _tabel,
-      // Nilai dikirim lewat whereArgs (tanda ?), BUKAN ditempel ke teks SQL,
-      // agar aman dari SQL injection dan dari tanda kutip seperti Jum'at.
       where: kunci.isEmpty
-          ? 'uid = ?'
-          : 'uid = ? AND (judul LIKE ? OR isi LIKE ?)',
-      whereArgs: kunci.isEmpty ? [uid] : [uid, '%$kunci%', '%$kunci%'],
+          ? null
+          : 'judul LIKE ? OR isi LIKE ?',
+      whereArgs: kunci.isEmpty ? null : ['%$kunci%', '%$kunci%'],
       orderBy: 'disematkan DESC, diubah DESC, id DESC',
     );
     return baris.map(Catatan.dariBaris).toList();
   }
 
-  // Jumlah seluruh catatan milik akun (tanpa terpengaruh pencarian).
   Future<int> hitung(String uid) async {
-    final Database db = await _layanan.database;
-    return Sqflite.firstIntValue(
-      await db.rawQuery('SELECT COUNT(*) FROM $_tabel WHERE uid = ?', [uid]),
-    ) ??
-        0;
+    try {
+      final Map<String, dynamic> data = await _layananApi.get('/posts?limit=0');
+      return data['total'] ?? 0;
+    } catch (_) {
+      final Database db = await _layananLokal.database;
+      return Sqflite.firstIntValue(
+            await db.rawQuery('SELECT COUNT(*) FROM $_tabel'),
+          ) ??
+          0;
+    }
   }
 
-  // Create: hasilnya id baris baru.
-  Future<Catatan> tambah(
-      String uid, {
-        required String judul,
-        required String isi,
-      }) async {
-    final Database db = await _layanan.database;
-    final Catatan baru = Catatan(
-      uid: uid,
-      judul: judul,
-      isi: isi,
-      diubah: DateTime.now(),
-    );
-    final int id = await db.insert(_tabel, baru.keBaris());
-    return baru.copyWith(id: id);
+  Future<Catatan> tambah(String uid, {required String judul, required String isi}) async {
+    final baru = Catatan(uid: uid, judul: judul, isi: isi, diubah: DateTime.now());
+    try {
+      // Simpan ke API
+      final res = await _layananApi.post('/posts/add', baru.toJson());
+      final catatanTersimpan = Catatan.fromJson(res);
+      
+      // Simpan juga ke SQLite lokal sebagai Cache
+      final Database db = await _layananLokal.database;
+      await db.insert(_tabel, catatanTersimpan.keBaris(), conflictAlgorithm: ConflictAlgorithm.replace);
+      
+      return catatanTersimpan;
+    } catch (_) {
+      // Offline mode: Simpan ke SQLite saja
+      final Database db = await _layananLokal.database;
+      final int id = await db.insert(_tabel, baru.keBaris());
+      return baru.copyWith(id: id);
+    }
   }
 
-  // Update: mengubah judul, isi, waktu, dan status sematan.
   Future<void> ubah(Catatan catatan) async {
-    final Database db = await _layanan.database;
+    // Update di SQLite lokal dulu
+    final Database db = await _layananLokal.database;
     await db.update(
       _tabel,
-      {
-        'judul': catatan.judul,
-        'isi': catatan.isi,
-        'diubah': catatan.diubah.millisecondsSinceEpoch,
-        'disematkan': catatan.disematkan ? 1 : 0,
-      },
-      where: 'id = ? AND uid = ?',
-      whereArgs: [catatan.id, catatan.uid],
+      catatan.keBaris(),
+      where: 'id = ?',
+      whereArgs: [catatan.id],
     );
+
+    // Lalu coba sync ke API
+    try {
+      await _layananApi.post('/posts/${catatan.id}', catatan.toJson());
+    } catch (_) {}
   }
 
-  // Delete.
   Future<void> hapus(Catatan catatan) async {
-    final Database db = await _layanan.database;
+    // Hapus di SQLite lokal
+    final Database db = await _layananLokal.database;
     await db.delete(
       _tabel,
-      where: 'id = ? AND uid = ?',
-      whereArgs: [catatan.id, catatan.uid],
+      where: 'id = ?',
+      whereArgs: [catatan.id],
     );
+
+    // Lalu coba sync ke API
+    try {
+      await _layananApi.post('/posts/${catatan.id}', {'isDeleted': true});
+    } catch (_) {}
   }
 
-  // Untuk tombol "Urungkan": menyimpan kembali lengkap dengan id lamanya.
   Future<void> pulihkan(Catatan catatan) async {
-    final Database db = await _layanan.database;
+    final Database db = await _layananLokal.database;
     await db.insert(
       _tabel,
       catatan.keBaris(),

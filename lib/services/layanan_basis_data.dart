@@ -13,12 +13,11 @@ class LayananBasisData {
   Future<Database> _buka() {
     return openDatabase(
       namaBerkas,
-      version: 1,
-      // onCreate hanya dijalankan SEKALI, saat berkas database belum ada.
+      version: 2, // Naik ke versi 2 untuk migrasi
       onCreate: (Database db, int versi) async {
         await db.execute('''
           CREATE TABLE catatan (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            id         INTEGER PRIMARY KEY,
             uid        TEXT NOT NULL,
             judul      TEXT NOT NULL,
             isi        TEXT NOT NULL,
@@ -26,6 +25,12 @@ class LayananBasisData {
             disematkan INTEGER NOT NULL DEFAULT 0
           )
         ''');
+      },
+      onUpgrade: (Database db, int versiLama, int versiBaru) async {
+        if (versiLama < 2) {
+          // Contoh migrasi skema jika ada perubahan tabel di masa depan
+          // Misal: ALTER TABLE catatan ADD COLUMN baru TEXT;
+        }
       },
     );
   }

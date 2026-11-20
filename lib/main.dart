@@ -10,6 +10,7 @@ import 'package:pa_mobile/providers/address_provider.dart';
 import 'package:pa_mobile/providers/cart_provider.dart';
 import 'package:pa_mobile/providers/catatan_provider.dart';
 import 'package:pa_mobile/repositories/repositori_catatan.dart';
+import 'package:pa_mobile/services/layanan_api.dart';
 import 'package:pa_mobile/services/layanan_basis_data.dart';
 import 'package:pa_mobile/utils/uji_catatan.dart';
 import 'package:pa_mobile/providers/favorite_provider.dart';
@@ -58,7 +59,12 @@ Future<void> main() async {
         ChangeNotifierProvider(create: (_) => AddressProvider()),
         ChangeNotifierProvider(create: (_) => FavoriteProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider(prefs: prefs)),
-        // Layanan database SQLite lokal; ditutup saat aplikasi selesai.
+        // Layanan API; ditutup saat aplikasi selesai.
+        Provider<LayananApi>(
+          create: (_) => LayananApi(),
+          dispose: (_, layanan) => layanan.tutup(),
+        ),
+        // Layanan basis data SQLite lokal; tetap diperlukan untuk Cache
         Provider<LayananBasisData>(
           create: (_) => LayananBasisData(),
           dispose: (_, layanan) => layanan.tutup(),
@@ -66,7 +72,8 @@ Future<void> main() async {
         ChangeNotifierProvider(
           create: (context) => CatatanProvider(
             repositori: RepositoriCatatan(
-              layanan: context.read<LayananBasisData>(),
+              layananApi: context.read<LayananApi>(),
+              layananLokal: context.read<LayananBasisData>(),
             ),
           ),
         ),
