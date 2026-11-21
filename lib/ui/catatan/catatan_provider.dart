@@ -3,7 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:pa_mobile/domain/models/catatan.dart';
 import 'package:pa_mobile/domain/models/hasil.dart';
-import 'package:pa_mobile/data/repositories/repositori_catatan.dart';
+import 'package:pa_mobile/domain/repositories/repositori_catatan.dart';
 import 'package:pa_mobile/domain/usecases/catatan_usecases.dart';
 import 'package:pa_mobile/ui/core/perintah.dart';
 

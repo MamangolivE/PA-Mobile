@@ -1,6 +1,6 @@
 import 'package:pa_mobile/domain/models/catatan.dart';
 import 'package:pa_mobile/domain/models/hasil.dart';
-import 'package:pa_mobile/data/repositories/repositori_catatan.dart';
+import 'package:pa_mobile/domain/repositories/repositori_catatan.dart';
 
 class RingkasanCatatan {
   final List<Catatan> daftar;
