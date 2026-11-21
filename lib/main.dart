@@ -6,17 +6,17 @@ import 'package:sqflite/sqflite.dart';
 import 'package:sqflite_common_ffi_web/sqflite_ffi_web.dart';
 import 'package:provider/provider.dart';
 import 'package:pa_mobile/firebase_options.dart';
-import 'package:pa_mobile/providers/address_provider.dart';
-import 'package:pa_mobile/providers/cart_provider.dart';
-import 'package:pa_mobile/providers/catatan_provider.dart';
-import 'package:pa_mobile/repositories/repositori_catatan.dart';
-import 'package:pa_mobile/services/layanan_api.dart';
-import 'package:pa_mobile/services/layanan_basis_data.dart';
-import 'package:pa_mobile/utils/uji_catatan.dart';
-import 'package:pa_mobile/providers/favorite_provider.dart';
-import 'package:pa_mobile/providers/theme_provider.dart';
-import 'package:pa_mobile/pages/auth_gate.dart';
-import 'package:pa_mobile/theme/app_colors.dart';
+import 'package:pa_mobile/ui/profil_alamat/address_provider.dart';
+import 'package:pa_mobile/ui/keranjang_pesanan/cart_provider.dart';
+import 'package:pa_mobile/ui/catatan/catatan_provider.dart';
+import 'package:pa_mobile/domain/repositories/repositori_catatan_impl.dart';
+import 'package:pa_mobile/data/services/layanan_api.dart';
+import 'package:pa_mobile/data/services/layanan_basis_data.dart';
+import 'package:pa_mobile/ui/testing/uji_catatan.dart';
+import 'package:pa_mobile/ui/katalog/favorite_provider.dart';
+import 'package:pa_mobile/ui/pengaturan/theme_provider.dart';
+import 'package:pa_mobile/ui/auth/auth_gate.dart';
+import 'package:pa_mobile/ui/core/app_colors.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -71,7 +71,7 @@ Future<void> main() async {
         ),
         ChangeNotifierProvider(
           create: (context) => CatatanProvider(
-            repositori: RepositoriCatatan(
+            repositori: RepositoriCatatanImpl(
               layananApi: context.read<LayananApi>(),
               layananLokal: context.read<LayananBasisData>(),
             ),
