@@ -9,7 +9,7 @@ import 'package:pa_mobile/firebase_options.dart';
 import 'package:pa_mobile/ui/profil_alamat/address_provider.dart';
 import 'package:pa_mobile/ui/keranjang_pesanan/cart_provider.dart';
 import 'package:pa_mobile/ui/catatan/catatan_provider.dart';
-import 'package:pa_mobile/domain/repositories/repositori_catatan_impl.dart';
+import 'package:pa_mobile/data/repositories/repositori_catatan_impl.dart';
 import 'package:pa_mobile/data/services/layanan_api.dart';
 import 'package:pa_mobile/data/services/layanan_basis_data.dart';
 import 'package:pa_mobile/ui/testing/uji_catatan.dart';

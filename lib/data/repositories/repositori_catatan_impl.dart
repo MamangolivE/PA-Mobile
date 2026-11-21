@@ -3,7 +3,7 @@ import 'package:pa_mobile/data/services/layanan_api.dart';
 import 'package:pa_mobile/data/services/layanan_basis_data.dart';
 import 'package:pa_mobile/domain/models/catatan.dart';
 import 'package:pa_mobile/domain/models/hasil.dart';
-import 'package:pa_mobile/domain/repositories/repositori_catatan.dart';
+import 'package:pa_mobile/data/repositories/repositori_catatan.dart';
 
 class RepositoriCatatanImpl implements RepositoriCatatan {
   RepositoriCatatanImpl({
