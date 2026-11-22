@@ -1,6 +1,12 @@
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:pa_mobile/ui/profil_alamat/address_page.dart';
 import 'package:pa_mobile/ui/catatan/catatan_page.dart';
 import 'package:pa_mobile/ui/katalog//favorite_page.dart';
@@ -13,8 +19,165 @@ import 'package:pa_mobile/ui/katalog/favorite_provider.dart';
 import 'package:pa_mobile/ui/pengaturan/theme_provider.dart';
 import 'package:pa_mobile/ui/core/app_colors.dart';
 
-class ProfilePage extends StatelessWidget {
+class ProfilePage extends StatefulWidget {
   const ProfilePage({super.key});
+
+  @override
+  State<ProfilePage> createState() => _ProfilePageState();
+}
+
+class _ProfilePageState extends State<ProfilePage> {
+  String? _profileImagePath;
+  Uint8List? _profileImageBytes;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadProfileImage();
+  }
+
+  Future<void> _loadProfileImage() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final prefs = await SharedPreferences.getInstance();
+      final base64String = prefs.getString('profile_image_base64_${user.uid}');
+      if (base64String != null && mounted) {
+        try {
+          final bytes = base64Decode(base64String);
+          setState(() => _profileImageBytes = bytes);
+          return;
+        } catch (_) {}
+      }
+      final path = prefs.getString('profile_image_${user.uid}');
+      if (path != null && mounted) {
+        setState(() => _profileImagePath = path);
+      }
+    }
+  }
+
+  ImageProvider? _getProfileImage() {
+    if (_profileImageBytes != null) {
+      return MemoryImage(_profileImageBytes!);
+    }
+    final path = _profileImagePath;
+    if (path == null) return null;
+    if (kIsWeb) {
+      return NetworkImage(path);
+    }
+    final file = File(path);
+    if (file.existsSync()) {
+      return FileImage(file);
+    }
+    return null;
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final picker = ImagePicker();
+      final pickedFile = await picker.pickImage(
+        source: source,
+        maxWidth: 1024,
+        maxHeight: 1024,
+        imageQuality: 85,
+      );
+
+      if (pickedFile != null) {
+        final bytes = await pickedFile.readAsBytes();
+        final base64String = base64Encode(bytes);
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          final prefs = await SharedPreferences.getInstance();
+          await prefs.setString('profile_image_base64_${user.uid}', base64String);
+          await prefs.setString('profile_image_${user.uid}', pickedFile.path);
+        }
+        if (mounted) {
+          setState(() {
+            _profileImageBytes = bytes;
+            _profileImagePath = pickedFile.path;
+          });
+          _info(context, 'Foto profil berhasil diperbarui!');
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        _info(context, 'Gagal memilih gambar: $e');
+      }
+    }
+  }
+
+  Future<void> _removeProfileImage() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user != null) {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.remove('profile_image_base64_${user.uid}');
+      await prefs.remove('profile_image_${user.uid}');
+    }
+    if (mounted) {
+      setState(() {
+        _profileImageBytes = null;
+        _profileImagePath = null;
+      });
+      _info(context, 'Foto profil berhasil dihapus.');
+    }
+  }
+
+  void _showImagePickerOptions() {
+    showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 16),
+                decoration: BoxDecoration(
+                  color: Colors.grey.shade400,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const Text(
+                'Ganti Foto Profil',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 12),
+              ListTile(
+                leading: const Icon(Icons.photo_library_rounded, color: Colors.blue),
+                title: const Text('Pilih dari Galeri'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickImage(ImageSource.gallery);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.camera_alt_rounded, color: Colors.green),
+                title: const Text('Ambil dari Kamera'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _pickImage(ImageSource.camera);
+                },
+              ),
+              if (_profileImagePath != null)
+                ListTile(
+                  leading: const Icon(Icons.delete_outline_rounded, color: Colors.red),
+                  title: const Text('Hapus Foto Profil', style: TextStyle(color: Colors.red)),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _removeProfileImage();
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   void _info(BuildContext context, String message) {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
@@ -38,6 +201,7 @@ class ProfilePage extends StatelessWidget {
     final displayName = user?.displayName?.trim() ?? '';
     final name = displayName.isEmpty ? email.split('@').first : displayName;
     final colors = Theme.of(context).colorScheme;
+    final imageProvider = _getProfileImage();
 
     return SingleChildScrollView(
       physics: const BouncingScrollPhysics(),
@@ -49,14 +213,46 @@ class ProfilePage extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(children: [
-                CircleAvatar(
-                  radius: 28,
-                  backgroundColor: colors.primaryContainer,
-                  foregroundColor: colors.onPrimaryContainer,
-                  child: Text(name.isEmpty ? 'U' : name[0].toUpperCase(),
-                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800)),
+                Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    CircleAvatar(
+                      radius: 30,
+                      backgroundColor: colors.primaryContainer,
+                      foregroundColor: colors.onPrimaryContainer,
+                      backgroundImage: imageProvider,
+                      child: imageProvider == null
+                          ? Text(name.isEmpty ? 'U' : name[0].toUpperCase(),
+                              style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w800))
+                          : null,
+                    ),
+                    Positioned(
+                      bottom: -2,
+                      right: -2,
+                      child: InkWell(
+                        onTap: _showImagePickerOptions,
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.all(5),
+                          decoration: BoxDecoration(
+                            color: context.appPrimary,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: context.appSurface,
+                              width: 2,
+                            ),
+                          ),
+                          child: const Icon(
+                            Icons.camera_alt_rounded,
+                            size: 13,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 14),
                 Expanded(child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

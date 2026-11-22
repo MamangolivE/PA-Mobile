@@ -13,6 +13,7 @@ import 'package:pa_mobile/data/repositories/repositori_catatan_impl.dart';
 import 'package:pa_mobile/data/services/layanan_api.dart';
 import 'package:pa_mobile/data/services/layanan_basis_data.dart';
 import 'package:pa_mobile/ui/testing/uji_catatan.dart';
+import 'package:pa_mobile/ui/testing/uji_fitur_perangkat.dart';
 import 'package:pa_mobile/ui/katalog/favorite_provider.dart';
 import 'package:pa_mobile/ui/pengaturan/theme_provider.dart';
 import 'package:pa_mobile/ui/auth/auth_gate.dart';
@@ -35,10 +36,11 @@ Future<void> main() async {
     databaseFactory = databaseFactoryFfiWeb;
   }
 
-  // Mode debug saja: memeriksa repository catatan dengan database di MEMORI
+  // Mode debug saja: memeriksa repository catatan dan fitur perangkat di MEMORI
   // (data asli tidak tersentuh). Hasilnya tampil di konsol.
   if (!isLinux && kDebugMode) {
     await jalankanUjiCatatan();
+    await jalankanUjiFiturPerangkat();
   }
 
   // Pengaturan dibaca ke memori SEBELUM runApp, agar tema langsung benar

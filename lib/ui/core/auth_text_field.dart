@@ -27,6 +27,8 @@ class AuthTextField extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isMultiLine = !obscure && maxLines > 1;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -42,33 +44,48 @@ class AuthTextField extends StatelessWidget {
           const SizedBox(height: 6),
         ],
         Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: isMultiLine ? 12 : 2,
+          ),
           decoration: BoxDecoration(
             color: context.appSurfaceContainerLow,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: Colors.transparent),
+            border: Border.all(color: context.appBorderSubtle),
           ),
-          child: TextField(
-            controller: controller,
-            obscureText: obscure,
-            keyboardType: keyboardType,
-            maxLines: obscure ? 1 : maxLines,
-            onChanged: onChanged,
-            style: TextStyle(
-              color: context.appTextPrimary,
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-            ),
-            decoration: InputDecoration(
-              border: InputBorder.none,
-              hintText: hint,
-              hintStyle: TextStyle(
-                color: context.appOutline,
-                fontSize: 13,
+          child: Row(
+            crossAxisAlignment: isMultiLine ? CrossAxisAlignment.start : CrossAxisAlignment.center,
+            children: [
+              Padding(
+                padding: EdgeInsets.only(top: isMultiLine ? 2 : 0, right: 12),
+                child: Icon(icon, size: 20, color: context.appPrimary),
               ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-              prefixIcon: Icon(icon, size: 20, color: context.appPrimary),
-              suffixIcon: suffix,
-            ),
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  obscureText: obscure,
+                  keyboardType: keyboardType,
+                  maxLines: obscure ? 1 : maxLines,
+                  onChanged: onChanged,
+                  style: TextStyle(
+                    color: context.appTextPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    border: InputBorder.none,
+                    hintText: hint,
+                    hintStyle: TextStyle(
+                      color: context.appOutline,
+                      fontSize: 13,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+              if (suffix != null) suffix!,
+            ],
           ),
         ),
       ],

@@ -1,5 +1,10 @@
+import 'dart:convert';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
+import 'package:http/http.dart' as http;
 import 'package:pa_mobile/domain/models/address.dart';
 import 'package:pa_mobile/ui/profil_alamat/address_provider.dart';
 import 'package:pa_mobile/ui/core/app_colors.dart';
@@ -22,6 +27,204 @@ class _AddressPageState extends State<AddressPage> {
 
   // Menyimpan pesan kesalahan ketika validasi formulir gagal.
   String errorMessage = '';
+
+  // Status proses pengambilan lokasi GPS saat ini
+  bool _isLoadingLocation = false;
+
+  // Reverse Geocoding alternatif menggunakan OpenStreetMap Nominatim
+  // Digunakan saat di Web (karena package geocoding tidak mendukung Web) atau ketika Geocoder native HP gagal.
+  Future<String?> _reverseGeocodeNominatim(double lat, double lon) async {
+    try {
+      final url = Uri.parse(
+        'https://nominatim.openstreetmap.org/reverse?format=json&lat=$lat&lon=$lon&zoom=18&addressdetails=1',
+      );
+      final response = await http.get(
+        url,
+        headers: {'User-Agent': 'BengkelKOM-App/1.0 (Mobile App Project)'},
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        final address = data['address'] as Map<String, dynamic>?;
+        if (address != null) {
+          final parts = <String>[];
+
+          final road = address['road'] ?? address['pedestrian'] ?? address['suburb'];
+          final houseNumber = address['house_number'];
+          if (road != null) {
+            parts.add(houseNumber != null ? '$road No. $houseNumber' : '$road');
+          }
+
+          final village = address['village'] ?? address['neighbourhood'] ?? address['suburb'] ?? address['quarter'];
+          if (village != null && village != road) {
+            parts.add('Kel. $village');
+          }
+
+          final cityDistrict = address['city_district'] ?? address['district'];
+          if (cityDistrict != null && cityDistrict != village) {
+            parts.add('Kec. $cityDistrict');
+          }
+
+          final city = address['city'] ?? address['town'] ?? address['municipality'] ?? address['county'];
+          if (city != null) {
+            parts.add('$city');
+          }
+
+          final state = address['state'];
+          if (state != null) {
+            parts.add('$state');
+          }
+
+          final postcode = address['postcode'];
+          if (postcode != null) {
+            parts.add('$postcode');
+          }
+
+          if (parts.isNotEmpty) {
+            return parts.join(', ');
+          }
+        }
+        final displayName = data['display_name'] as String?;
+        if (displayName != null && displayName.isNotEmpty) {
+          return displayName;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // Mengambil koordinat GPS dan melakukan reverse-geocoding menjadi alamat teks
+  Future<void> _fillCurrentLocation() async {
+    setState(() => _isLoadingLocation = true);
+
+    try {
+      // 1. Periksa apakah layanan lokasi (GPS) pada perangkat aktif
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Layanan lokasi (GPS) belum aktif. Silakan aktifkan GPS perangkat Anda.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+        return;
+      }
+
+      // 2. Periksa dan minta izin akses lokasi
+      var permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Izin akses lokasi ditolak oleh pengguna.'),
+              backgroundColor: Colors.red,
+            ),
+          );
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Izin lokasi ditolak secara permanen. Buka pengaturan aplikasi untuk mengizinkan.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+        return;
+      }
+
+      // 3. Dapatkan koordinat lokasi sekarang
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: const LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: Duration(seconds: 15),
+        ),
+      );
+
+      String? fullAddress;
+
+      // 4. Coba reverse geocoding native (hanya untuk non-Web: Android / iOS)
+      if (!kIsWeb) {
+        try {
+          final placemarks = await placemarkFromCoordinates(
+            position.latitude,
+            position.longitude,
+          );
+
+          if (placemarks.isNotEmpty) {
+            final place = placemarks.first;
+            final parts = <String>[];
+
+            final street = place.street?.trim() ?? '';
+            if (street.isNotEmpty) parts.add(street);
+
+            final subLocality = place.subLocality?.trim() ?? '';
+            if (subLocality.isNotEmpty && subLocality != street) {
+              parts.add('Kel. $subLocality');
+            }
+
+            final locality = place.locality?.trim() ?? '';
+            if (locality.isNotEmpty && locality != subLocality) {
+              parts.add('Kec. $locality');
+            }
+
+            final subAdminArea = place.subAdministrativeArea?.trim() ?? '';
+            if (subAdminArea.isNotEmpty) {
+              parts.add(subAdminArea);
+            }
+
+            final adminArea = place.administrativeArea?.trim() ?? '';
+            if (adminArea.isNotEmpty) {
+              parts.add(adminArea);
+            }
+
+            final postalCode = place.postalCode?.trim() ?? '';
+            if (postalCode.isNotEmpty) {
+              parts.add(postalCode);
+            }
+
+            if (parts.isNotEmpty) {
+              fullAddress = parts.join(', ');
+            }
+          }
+        } catch (_) {
+          // Jika geocoding native gagal / offline, gunakan fallback di bawah
+        }
+      }
+
+      // 5. Fallback ke OpenStreetMap jika Web atau jika geocoding native tidak mengembalikan hasil
+      fullAddress ??= await _reverseGeocodeNominatim(position.latitude, position.longitude);
+
+      // 6. Jika kedua cara tidak mengembalikan alamat teks, gunakan koordinat angka
+      fullAddress ??= 'Titik Koordinat: ${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}';
+
+      detailController.text = fullAddress;
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Alamat berhasil dideteksi dari lokasi perangkat!'),
+          backgroundColor: Colors.green,
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Gagal mendapatkan lokasi: $e'),
+          backgroundColor: Colors.red,
+        ),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingLocation = false);
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -122,6 +325,51 @@ class _AddressPageState extends State<AddressPage> {
                             keyboardType: TextInputType.phone,
                           ),
                           const SizedBox(height: 12),
+
+                          // Tombol cepat ambil lokasi saat ini via GPS
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(
+                                'Alamat Lengkap',
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                  color: context.appTextPrimary,
+                                ),
+                              ),
+                              TextButton.icon(
+                                onPressed: _isLoadingLocation ? null : _fillCurrentLocation,
+                                style: TextButton.styleFrom(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  visualDensity: VisualDensity.compact,
+                                ),
+                                icon: _isLoadingLocation
+                                    ? SizedBox(
+                                        width: 14,
+                                        height: 14,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: context.appPrimary,
+                                        ),
+                                      )
+                                    : Icon(
+                                        Icons.my_location_rounded,
+                                        size: 16,
+                                        color: context.appPrimary,
+                                      ),
+                                label: Text(
+                                  _isLoadingLocation ? 'Mendeteksi...' : 'Lokasi Saat Ini',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold,
+                                    color: context.appPrimary,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
 
                           // Input alamat lengkap dengan beberapa baris teks.
                           AuthTextField(

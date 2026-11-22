@@ -6,13 +6,7 @@ import 'package:pa_mobile/domain/models/hasil.dart';
 import 'package:pa_mobile/domain/repositories/repositori_catatan.dart';
 
 class RepositoriCatatanImpl implements RepositoriCatatan {
-  RepositoriCatatanImpl({
-    required LayananApi layananApi,
-    required LayananBasisData layananLokal,
-    DateTime Function()? sekarang,
-  })  : _layananApi = layananApi,
-        _layananLokal = layananLokal,
-        _sekarang = sekarang ?? DateTime.now;
+  RepositoriCatatanImpl({required this._layananApi, required LayananBasisData layananLokal, DateTime Function()? sekarang}) : _layananLokal = layananLokal, _sekarang = sekarang ?? DateTime.now;
 
   final LayananApi _layananApi;
   final LayananBasisData _layananLokal;
@@ -32,59 +26,78 @@ class RepositoriCatatanImpl implements RepositoriCatatan {
 
   Catatan _dariBaris(Map<String, Object?> baris) {
     return switch (baris) {
-      {
-      'id': final int id,
-      'uid': final String uid,
-      'judul': final String judul,
-      'isi': final String isi,
-      'diubah': final int diubah,
-      'disematkan': final int disematkan,
-      } =>
-          Catatan(
-            id: id,
-            uid: uid,
-            judul: judul,
-            isi: isi,
-            diubah: DateTime.fromMillisecondsSinceEpoch(diubah),
-            disematkan: disematkan == 1,
-          ),
+      {'id': final int id, 'uid': final String uid, 'judul': final String judul, 'isi': final String isi, 'diubah': final int diubah, 'disematkan': final int disematkan} => Catatan(
+        id: id,
+        uid: uid,
+        judul: judul,
+        isi: isi,
+        diubah: DateTime.fromMillisecondsSinceEpoch(diubah),
+        disematkan: disematkan == 1,
+      ),
       _ => throw FormatException('Baris catatan tidak sesuai: $baris'),
     };
   }
 
+  Catatan _dariJson(Map<String, dynamic> json, String uid) {
+    return Catatan(
+      id: json['id'] as int?,
+      uid: (json['userId']?.toString()) ?? uid,
+      judul: (json['title'] as String?) ?? 'Tanpa Judul',
+      isi: (json['body'] as String?) ?? '',
+      diubah: _sekarang(),
+      disematkan: false,
+    );
+  }
+
   Map<String, dynamic> _keJson(Catatan catatan) {
-    return {
-      'title': catatan.judul,
-      'body': catatan.isi,
-      'userId': int.tryParse(catatan.uid) ?? 1,
-    };
+    return {'title': catatan.judul, 'body': catatan.isi, 'userId': int.tryParse(catatan.uid) ?? 1};
   }
 
   @override
-  Future<Hasil<List<Catatan>>> ambilSemua(
-      String uid, {
-        String kataKunci = '',
-      }) async {
+  Future<Hasil<List<Catatan>>> ambilSemua(String uid, {String kataKunci = ''}) async {
     try {
-      final Database db = await _layananLokal.database;
       final String kunci = kataKunci.trim();
 
-      final baris = await db.query(
-    _tabel,
-    where: kunci.isEmpty
-    ? 'uid = ?'
-        : 'uid = ? AND (judul LIKE ? OR isi LIKE ?)',
-    whereArgs: kunci.isEmpty
-    ? [uid]
-        : [uid, '%$kunci%', '%$kunci%'],
-    orderBy: 'disematkan DESC, diubah DESC, id DESC',
-    );
+      // 1. Coba ambil data dari API Server (DummyJSON - Materi Rest API / Offline-first)
+      try {
+        final path = kunci.isEmpty ? '/posts' : '/posts/search?q=$kunci';
+        final Map<String, dynamic> data = await _layananApi.get(path);
+        final List<dynamic> list = data['posts'] ?? [];
+        final List<Catatan> daftarApi = list
+            .map((item) => _dariJson(item as Map<String, dynamic>, uid))
+            .toList();
 
-    return Berhasil(baris.map(_dariBaris).toList());
+        if (daftarApi.isNotEmpty) {
+          // Berhasil dari API: Simpan/Update data ke Cache SQLite Lokal
+          final Database db = await _layananLokal.database;
+          final Batch batch = db.batch();
+          for (final Catatan item in daftarApi) {
+            batch.insert(
+              _tabel,
+              _keBaris(item),
+              conflictAlgorithm: ConflictAlgorithm.replace,
+            );
+          }
+          await batch.commit(noResult: true);
+
+          return Berhasil(daftarApi);
+        }
+      } catch (_) {
+        // Jika API gagal (Offline / Network Error), fallback membaca dari SQLite Lokal
+      }
+
+      // 2. Baca dari SQLite lokal (Offline Fallback)
+      final Database db = await _layananLokal.database;
+      final baris = await db.query(
+        _tabel,
+        where: kunci.isEmpty ? 'uid = ?' : 'uid = ? AND (judul LIKE ? OR isi LIKE ?)',
+        whereArgs: kunci.isEmpty ? [uid] : [uid, '%$kunci%', '%$kunci%'],
+        orderBy: 'disematkan DESC, diubah DESC, id DESC',
+      );
+
+      return Berhasil(baris.map(_dariBaris).toList());
     } catch (e) {
-    return Gagal(
-    Kegagalan('Gagal memuat catatan lokal.', penyebab: e),
-    );
+      return Gagal(Kegagalan('Gagal memuat catatan.', penyebab: e));
     }
   }
 
@@ -92,13 +105,7 @@ class RepositoriCatatanImpl implements RepositoriCatatan {
   Future<Hasil<int>> hitung(String uid) async {
     try {
       final Database db = await _layananLokal.database;
-      final int total = Sqflite.firstIntValue(
-        await db.rawQuery(
-          'SELECT COUNT(*) FROM $_tabel WHERE uid = ?',
-          [uid],
-        ),
-      ) ??
-          0;
+      final int total = Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM $_tabel WHERE uid = ?', [uid])) ?? 0;
       return Berhasil(total);
     } catch (e) {
       return Gagal(Kegagalan('Gagal menghitung catatan.', penyebab: e));
@@ -106,25 +113,12 @@ class RepositoriCatatanImpl implements RepositoriCatatan {
   }
 
   @override
-  Future<Hasil<Catatan>> tambah(
-      String uid, {
-        required String judul,
-        required String isi,
-      }) async {
-    final baru = Catatan(
-      uid: uid,
-      judul: judul,
-      isi: isi,
-      diubah: _sekarang(),
-    );
+  Future<Hasil<Catatan>> tambah(String uid, {required String judul, required String isi}) async {
+    final baru = Catatan(uid: uid, judul: judul, isi: isi, diubah: _sekarang());
 
     try {
       final Database db = await _layananLokal.database;
-      final int id = await db.insert(
-        _tabel,
-        _keBaris(baru),
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      final int id = await db.insert(_tabel, _keBaris(baru), conflictAlgorithm: ConflictAlgorithm.replace);
       final tersimpan = baru.copyWith(id: id);
 
       // Kirim ke API secara opsional/sinkronisasi ringan tanpa mengalahkan data lokal.
@@ -142,12 +136,7 @@ class RepositoriCatatanImpl implements RepositoriCatatan {
   Future<Hasil<void>> ubah(Catatan catatan) async {
     try {
       final Database db = await _layananLokal.database;
-      await db.update(
-        _tabel,
-        _keBaris(catatan),
-        where: 'id = ? AND uid = ?',
-        whereArgs: [catatan.id, catatan.uid],
-      );
+      await db.update(_tabel, _keBaris(catatan), where: 'id = ? AND uid = ?', whereArgs: [catatan.id, catatan.uid]);
 
       try {
         await _layananApi.post('/posts/${catatan.id}', _keJson(catatan));
@@ -163,11 +152,7 @@ class RepositoriCatatanImpl implements RepositoriCatatan {
   Future<Hasil<void>> hapus(Catatan catatan) async {
     try {
       final Database db = await _layananLokal.database;
-      await db.delete(
-        _tabel,
-        where: 'id = ? AND uid = ?',
-        whereArgs: [catatan.id, catatan.uid],
-      );
+      await db.delete(_tabel, where: 'id = ? AND uid = ?', whereArgs: [catatan.id, catatan.uid]);
 
       try {
         await _layananApi.post('/posts/${catatan.id}', {'isDeleted': true});
@@ -183,11 +168,7 @@ class RepositoriCatatanImpl implements RepositoriCatatan {
   Future<Hasil<void>> pulihkan(Catatan catatan) async {
     try {
       final Database db = await _layananLokal.database;
-      await db.insert(
-        _tabel,
-        _keBaris(catatan),
-        conflictAlgorithm: ConflictAlgorithm.replace,
-      );
+      await db.insert(_tabel, _keBaris(catatan), conflictAlgorithm: ConflictAlgorithm.replace);
       return const Berhasil(null);
     } catch (e) {
       return Gagal(Kegagalan('Gagal memulihkan catatan.', penyebab: e));
